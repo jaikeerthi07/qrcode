@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AR QR Code Player</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
+    <style>
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+
+        #loader {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            z-index: 10;
+        }
+
+        #container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: none;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #camera-stream {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+        }
+
+        #ar-video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            transform-origin: top left;
+            z-index: 2;
+            display: none;
+            opacity: 0.95;
+        }
+
+        #qr-canvas {
+            display: none;
+        }
+
+        #play-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 20;
+            color: white;
+        }
+
+        #start-btn {
+            margin-top: 30px;
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        #start-btn:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="loader">Requesting camera access...</div>
+    <div id="container">
+        <video id="camera-stream" playsinline autoplay muted></video>
+        <video id="ar-video" src="animation.mp4" playsinline loop></video>
+        <canvas id="qr-canvas"></canvas>
+    </div>
+
+    <div id="play-overlay">
+        <h2>QR Code AR Player</h2>
+        <p>1. Ensure your sound is on.</p>
+        <p>2. Point camera at the QR code.</p>
+        <button id="start-btn">Start Experience</button>
+    </div>
+
+    <script>
+        const video = document.getElementById('camera-stream');
+        const arVideo = document.getElementById('ar-video');
+        const canvasElement = document.getElementById('qr-canvas');
+        const canvas = canvasElement.getContext('2d');
+        const loader = document.getElementById('loader');
+        const container = document.getElementById('container');
+        const playOverlay = document.getElementById('play-overlay');
+        const startBtn = document.getElementById('start-btn');
+
+        let videoPlaying = false;
+        let arVideoInit = false;
+
+        startBtn.addEventListener('click', () => {
+            playOverlay.style.display = 'none';
+            arVideo.play().then(() => {
+                arVideo.pause(); // Initialize video context
+                arVideoInit = true;
+                startCamera();
+            }).catch(e => {
+                console.error("Video play initial error", e);
+                startCamera(); // Fallback
+            });
+        });
+
+        function startCamera() {
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function (stream) {
+                video.srcObject = stream;
+                video.setAttribute("playsinline", true);
+                video.play();
+                requestAnimationFrame(tick);
+                loader.style.display = 'none';
+                container.style.display = 'flex';
+            }).catch(function (err) {
+                alert("Camera error: " + err.message);
+            });
+        }
+
+        function getTransform(src, dst) {
+            let A = [];
+            let B = [];
+            for (let i = 0; i < 4; i++) {
+                A.push([src[i].x, src[i].y, 1, 0, 0, 0, -src[i].x * dst[i].x, -src[i].y * dst[i].x]);
+                A.push([0, 0, 0, src[i].x, src[i].y, 1, -src[i].x * dst[i].y, -src[i].y * dst[i].y]);
+                B.push(dst[i].x);
+                B.push(dst[i].y);
+            }
+
+            let h;
+            try {
+                h = numeric.solve(A, B);
+            } catch (e) {
+                return null;
+            }
+
+            return `matrix3d(${h[0]}, ${h[3]}, 0, ${h[6]}, ${h[1]}, ${h[4]}, 0, ${h[7]}, 0, 0, 1, 0, ${h[2]}, ${h[5]}, 0, 1)`;
+        }
+
+        function tick() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                canvasElement.height = video.videoHeight;
+                canvasElement.width = video.videoWidth;
+                canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+
+                var imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
+                var code = jsQR(imageData.data, imageData.width, imageData.height, {
+                    inversionAttempts: "dontInvert",
+                });
+
+                if (code) {
+                    if (!videoPlaying) {
+                        arVideo.play();
+                        arVideo.style.display = 'block';
+                        videoPlaying = true;
+                    }
+
+                    const w = arVideo.videoWidth || 640;
+                    const h = arVideo.videoHeight || 480;
+
+                    arVideo.style.width = w + 'px';
+                    arVideo.style.height = h + 'px';
+
+                    const srcPoints = [
+                        { x: 0, y: 0 },
+                        { x: w, y: 0 },
+                        { x: w, y: h },
+                        { x: 0, y: h }
+                    ];
+
+                    const videoRatio = video.videoWidth / video.videoHeight;
+                    const screenRatio = window.innerWidth / window.innerHeight;
+
+                    let scale, offsetX = 0, offsetY = 0;
+
+                    if (screenRatio > videoRatio) {
+                        scale = window.innerWidth / video.videoWidth;
+                        offsetY = (window.innerHeight - video.videoHeight * scale) / 2;
+                    } else {
+                        scale = window.innerHeight / video.videoHeight;
+                        offsetX = (window.innerWidth - video.videoWidth * scale) / 2;
+                    }
+
+                    const dstPoints = [
+                        { x: code.location.topLeftCorner.x * scale + offsetX, y: code.location.topLeftCorner.y * scale + offsetY },
+                        { x: code.location.topRightCorner.x * scale + offsetX, y: code.location.topRightCorner.y * scale + offsetY },
+                        { x: code.location.bottomRightCorner.x * scale + offsetX, y: code.location.bottomRightCorner.y * scale + offsetY },
+                        { x: code.location.bottomLeftCorner.x * scale + offsetX, y: code.location.bottomLeftCorner.y * scale + offsetY }
+                    ];
+
+                    const transform = getTransform(srcPoints, dstPoints);
+                    if (transform) {
+                        arVideo.style.transform = transform;
+                    }
+                }
+            }
+            requestAnimationFrame(tick);
+        }
+    </script>
+</body>
+
+</html>
