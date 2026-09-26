@@ -8,6 +8,8 @@
   },
   "dependencies": {
     "express": "^4.18.2",
+    "jimp": "^0.22.12",
+    "jsqr": "^1.4.0",
     "localtunnel": "^2.0.2",
     "qrcode": "^1.5.3"
   }
